@@ -1,0 +1,1 @@
+CreateObject("WScript.Shell").Run Chr(34) & Replace(WScript.ScriptFullName, "lancer-sans-fenetre.vbs", "lancer.bat") & Chr(34), 0
