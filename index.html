@@ -42,8 +42,7 @@ select{background:var(--card2);border:1px solid var(--border);color:var(--text);
 .progress-fill{height:100%;width:0;background:linear-gradient(90deg,var(--text),#888);border-radius:999px;transition:width .4s ease;position:relative;overflow:hidden}
 .progress-fill::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.25),transparent);animation:shimmer 1.2s infinite;opacity:.6}
 @keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
-.progress-label{position:absolute;inset:0;display:grid;place-items:center;font-size:10px;font-weight:700;letter-spacing:.04em;color:#000;mix-blend-mode:screen}
-[data-theme="dark"] .progress-label{color:#000}
+.progress-label{position:absolute;inset:0;display:grid;place-items:center;font-size:10px;font-weight:700;letter-spacing:.04em;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6)}
 .summary{font-size:12px;color:var(--muted);margin-top:8px;display:flex;justify-content:space-between}
 .table-wrap{flex:1;overflow:auto;min-height:0}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -91,9 +90,9 @@ audio::-webkit-media-controls-panel{background:var(--card2)}
       <div class="card-head"><h2>Source</h2><button class="btn" id="copyPrompt">📋 Copier prompt</button></div>
       <div class="card-body">
         <div class="drop" id="drop">
-          <strong>Dépose .xlsx / .csv ici</strong>
+          <strong>Dépose .xlsx / .csv / .txt ici</strong>
           <p>ou clique pour choisir un fichier</p>
-          <input type="file" id="file" accept=".xlsx,.xls,.csv" hidden>
+          <input type="file" id="file" accept=".xlsx,.csv,.txt" hidden>
         </div>
         <div class="muted" id="fileInfo" style="margin-top:10px"></div>
       </div>
@@ -113,10 +112,20 @@ DudePlaya - DYSTOPIA
             <option value="320">320 kbps</option>
           </select>
           <button class="btn-primary btn" id="start" style="flex:1;justify-content:center">⬇️ Lancer</button>
+          <button class="btn" id="pauseBtn" disabled title="Suspendre / reprendre">⏸️</button>
+          <button class="btn" id="stopBtn" disabled title="Arrêter (les morceaux OK sont gardés)">⏹️</button>
         </div>
         <div class="muted">Ordre : <b>Artiste - Titre</b> (détection par nom de colonne pour les fichiers, ordre colonnes indifférent)</div>
       </div>
     </div>
+
+    <details class="card">
+      <summary class="card-head" style="cursor:pointer;list-style:none"><h2>Diagnostic</h2><span class="muted">état moteur</span></summary>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+        <div class="muted" id="diag" style="white-space:pre-wrap;font-size:11px">Chargement…</div>
+        <div class="row"><button class="btn" id="copyDiag">📋 Copier le diagnostic</button></div>
+      </div>
+    </details>
   </div>
 
   <div class="panel">
@@ -153,7 +162,7 @@ const themeBtn=$('#theme');
 function applyTheme(t){document.documentElement.setAttribute('data-theme',t);themeBtn.textContent=t==='light'?'☀️':'🌙';localStorage.setItem('theme',t)}
 applyTheme(localStorage.getItem('theme')||'dark');
 themeBtn.onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
-function sanitize(n){return n.replace(/[<>:"/\\|?*\x00-\x1f]/g,'').replace(/\s+/g,' ').trim().slice(0,150)}
+function sanitize(n){return n.replace(/[<>:"/\\|?*\x00-\x1f]/g,'').replace(/\s+/g,' ').trim().replace(/^[. ]+/,'').replace(/[. ]+$/,'').slice(0,150)}
 $('#copyPrompt').onclick=async()=>{
   const r=await fetch('/api/prompt'); const j=await r.json();
   await navigator.clipboard.writeText((j.prompt||'').trim());
@@ -176,9 +185,137 @@ async function upload(f){
 }
 $('#openFolder').onclick=()=>fetch('/api/open-folder').then(()=>toast('Dossier ouvert'));
 $('#zip').onclick=()=>location.href='/api/zip';
-function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-let startTime=0;
+async function fetchImport(){
+  try{
+    const r=await fetch('/api/import'); const j=await r.json();
+    if(j.tracks && j.tracks.length){
+      const incoming=j.tracks.map(t=>`${t.artiste} - ${t.titre}`).join('\n');
+      fetch('/api/import',{method:'DELETE'}).catch(()=>{}); // import à usage unique
+      if($('#text').value.trim() && $('#text').value.trim()!==incoming){
+        $('#countInfo').textContent=j.tracks.length+' reçus — liste actuelle conservée';
+        toast(j.tracks.length+' titres reçus (liste conservée)');
+        return true;
+      }
+      $('#text').value=incoming;
+      $('#countInfo').textContent=j.tracks.length+' détectés'+(j.source?' — via '+j.source:'');
+      toast(j.tracks.length+' titres reçus'+(j.source?' de '+j.source:''));
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
+// L'extension envoie -> l'app pré-remplit seule (au chargement + à chaque retour sur l'onglet,
+// car l'envoi peut arriver pendant que l'onglet est déjà ouvert). Nettoie ?import=1 historique.
+history.replaceState(null,'',location.pathname);
+fetchImport();
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) fetchImport(); });
+window.addEventListener('focus',()=>fetchImport());
+let diagData=null;
+fetch('/api/health').then(r=>r.json()).then(j=>{
+  diagData=j;
+  $('#diag').textContent=`moteur OK · port ${location.port||'?'}\nffmpeg: ${j.ffmpeg?'✅':'❌ manquant'}\nyt-dlp: ${j.yt_dlp||'?'}\npython: ${j.python||'?'}\nimport en attente: ${j.pending_import}`;
+}).catch(()=>{$('#diag').textContent='moteur injoignable — relance via le raccourci'});
+$('#copyDiag').onclick=async()=>{
+  await navigator.clipboard.writeText(JSON.stringify(diagData||{},null,2)).catch(()=>{});
+  toast('Diagnostic copié');
+};
+function esc(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+// État du run : Piloté par le job serveur (pause entre pistes, stop, reprise = relance + skip auto).
+let jobId=null, running=false, paused=false, elapsedSec=0, timer=null, ctl=null, stopping=false;
+let ok=0,skip=0,fail=0,totalN=0;
+function tickStart(){stopTick(); timer=setInterval(()=>{elapsedSec++; $('#elapsed').textContent=elapsedSec+'s écoulées'},1000)}
+function stopTick(){if(timer){clearInterval(timer); timer=null}}
+function setRunningUI(on){
+  running=on;
+  $('#start').disabled=on;
+  $('#pauseBtn').disabled=!on;
+  $('#stopBtn').disabled=!on;
+  if(!on){paused=false; jobId=null; $('#pauseBtn').textContent='⏸️'; document.title='youtube-audio-dl'}
+}
+function setPausedUI(on){
+  paused=on;
+  $('#pauseBtn').textContent=on?'▶️':'⏸️';
+  if(on) stopTick(); else tickStart();
+}
+function buildRows(tracks){
+  const tbody=$('#tbody'); tbody.innerHTML='';
+  tracks.forEach((t,i)=>{
+    const tr=document.createElement('tr'); tr.id='r'+i;
+    tr.innerHTML=`<td class="muted">${i+1}</td><td>${esc(t.artiste)}</td><td>${esc(t.titre)}</td><td><span class="badge b-wait">⏳ attente</span></td><td class="muted">—</td>`;
+    tbody.appendChild(tr);
+  });
+}
+function updateProgress(tot){
+  const done=ok+skip+fail; const pct=tot?Math.round(done/tot*100):0;
+  document.title=`${done}/${tot} — youtube-audio-dl`;
+  $('#sOk').textContent=ok; $('#sSkip').textContent=skip; $('#sFail').textContent=fail;
+  $('#summary').textContent=`${done} / ${tot}`;
+  $('#bar').style.width=pct+'%'; $('#pct').textContent=pct+'%';
+}
+function rowBadge(i,cls,txt,title){
+  const tr=document.getElementById('r'+(i-1)); if(!tr) return null;
+  tr.classList.remove('active');
+  const badge=tr.querySelector('td:nth-child(4) span');
+  badge.className='badge '+cls; badge.textContent=txt; if(title!==undefined) badge.title=title;
+  return tr;
+}
+function rowAudio(i,artiste,titre){
+  const tr=document.getElementById('r'+(i-1)); if(!tr) return;
+  const fn=sanitize(artiste+' - '+titre)+'.mp3';
+  tr.querySelector('td:nth-child(5)').innerHTML=`<audio controls preload="none" src="/downloads/${encodeURIComponent(fn)}"></audio>`;
+}
+function applyMsg(j, silent){
+  if(j.job) jobId=j.job;
+  if(j.done || j.cancelled){finishRun(j); return}
+  if(j.error && !j.i){ $('#logs').style.display='block'; $('#logs').textContent+=j.error+'\n'; return}
+  if(!j.i) return;
+  totalN=j.total||totalN;
+  if(j.status==='searching'){
+    if(paused) setPausedUI(false);
+    const r=rowBadge(j.i,'b-run','🔍 recherche'); if(r) r.classList.add('active');
+  }
+  else if(j.status==='ok'){ok++; rowBadge(j.i,'b-ok','✅ OK'); rowAudio(j.i,j.artiste,j.titre)}
+  else if(j.status==='skip'){skip++; rowBadge(j.i,'b-skip','⏭️ skip'); rowAudio(j.i,j.artiste,j.titre)}
+  else if(j.status==='fail'){fail++; rowBadge(j.i,'b-fail','❌ échec',j.error||''); $('#logs').style.display='block'; $('#logs').textContent+=`[${j.artiste} - ${j.titre}] ${j.error||''}\n`}
+  else if(j.status==='paused'){
+    if(!paused) setPausedUI(true);
+    rowBadge(j.i,'b-run','⏸️ pause');
+  }
+  else if(j.status==='resumed'){setPausedUI(false); if(!silent) toast('Reprise')}
+  else if(j.status==='stopped'){rowBadge(j.i,'b-fail','⏹️ arrêté')}
+  updateProgress(totalN);
+}
+function finishRun(j){
+  stopTick();
+  totalN=j.total||totalN;
+  ok=j.ok!==undefined?j.ok:ok; skip=j.skip!==undefined?j.skip:skip; fail=j.fail!==undefined?j.fail:fail;
+  updateProgress(totalN);
+  const sec=elapsedSec; $('#elapsed').textContent=sec+'s total';
+  if(j.done){$('#bar').style.width='100%'; $('#pct').textContent='100%'}
+  setRunningUI(false);
+  if(stopping) return; // le gestionnaire Stop affiche son propre bilan
+  if(j.cancelled) toast(`Arrêté — ${ok+skip} conservé(s), relance pour reprendre`);
+  else if(fail) toast(fail+' échec(s)');
+  else toast('Terminé');
+}
+async function readStream(resp){
+  const reader=resp.body.getReader(); const dec=new TextDecoder(); let buf='';
+  while(true){
+    const {done,value}=await reader.read(); if(done) break;
+    buf+=dec.decode(value,{stream:true});
+    let idx; while((idx=buf.indexOf('\n\n'))!==-1){
+      const chunk=buf.slice(0,idx); buf=buf.slice(idx+2);
+      for(const line of chunk.split('\n')){
+        if(!line.startsWith('data: ')) continue;
+        let j; try{j=JSON.parse(line.slice(6))}catch{continue}
+        applyMsg(j);
+        if(!running) return;
+      }
+    }
+  }
+}
 $('#start').onclick=async()=>{
+  if(running) return;
   const text=$('#text').value.trim();
   const quality=$('#quality').value;
   if(!text){toast('Colle une liste ou dépose un fichier'); return}
@@ -189,59 +326,79 @@ $('#start').onclick=async()=>{
     tracks=prev.tracks;
   }catch(e){toast('Erreur réseau'); return}
   if(!tracks.length){toast('Aucun morceau (format: Artiste - Titre)'); return}
-  const tbody=$('#tbody'); tbody.innerHTML='';
-  tracks.forEach((t,i)=>{
-    const tr=document.createElement('tr'); tr.id='r'+i;
-    tr.innerHTML=`<td class="muted">${i+1}</td><td>${esc(t.artiste)}</td><td>${esc(t.titre)}</td><td><span class="badge b-wait">⏳ attente</span></td><td class="muted">—</td>`;
-    tbody.appendChild(tr);
-  });
+  buildRows(tracks);
+  totalN=tracks.length; ok=skip=fail=0; elapsedSec=0;
   $('#progressWrap').style.display='block'; $('#sTotal').textContent=tracks.length; $('#sOk').textContent='0'; $('#sSkip').textContent='0'; $('#sFail').textContent='0';
   $('#bar').style.width='0%'; $('#pct').textContent='0%'; $('#summary').textContent=`0 / ${tracks.length}`; $('#elapsed').textContent='démarré…'; $('#logs').style.display='none'; $('#logs').textContent='';
-  startTime=Date.now(); $('#start').disabled=true;
-  let ok=0,skip=0,fail=0;
-  const timer=setInterval(()=>{const s=Math.round((Date.now()-startTime)/1000); $('#elapsed').textContent=s+'s écoulées'},1000);
+  document.title=`0 / ${tracks.length} — youtube-audio-dl`;
   try{
-    const resp=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text, quality, tracks})});
-    if(!resp.ok){const j=await resp.json().catch(()=>({})); toast(j.error||'Erreur'); clearInterval(timer); $('#start').disabled=false; return}
-    if(!resp.body){toast('Streaming non supporté'); clearInterval(timer); $('#start').disabled=false; return}
-    const reader=resp.body.getReader(); const dec=new TextDecoder(); let buf='';
-    while(true){
-      const {done,value}=await reader.read(); if(done) break;
-      buf+=dec.decode(value,{stream:true});
-      let idx; while((idx=buf.indexOf('\n\n'))!==-1){
-        const chunk=buf.slice(0,idx); buf=buf.slice(idx+2);
-        for(const line of chunk.split('\n')){
-          if(!line.startsWith('data: ')) continue;
-          let j; try{j=JSON.parse(line.slice(6))}catch{continue}
-          if(j.done){ clearInterval(timer); const sec=Math.round((Date.now()-startTime)/1000); $('#elapsed').textContent=sec+'s total'; $('#bar').style.width='100%'; $('#pct').textContent='100%'; $('#start').disabled=false; if(fail) toast(fail+' échec(s)'); else toast('Terminé'); continue}
-          if(j.error && !j.i){ $('#logs').style.display='block'; $('#logs').textContent+=j.error+'\n'; continue}
-          if(j.i){
-            const tr=document.getElementById('r'+(j.i-1)); if(!tr) continue;
-            const badge=tr.querySelector('td:nth-child(4) span'); const audioCell=tr.querySelector('td:nth-child(5)');
-            tr.classList.remove('active');
-            if(j.status==='searching'){badge.className='badge b-run'; badge.textContent='🔍 recherche'; tr.classList.add('active')}
-            else if(j.status==='ok'){
-              badge.className='badge b-ok'; badge.textContent='✅ OK'; ok++;
-              const fn=sanitize(j.artiste+' - '+j.titre)+'.mp3';
-              audioCell.innerHTML=`<audio controls preload="none" src="/downloads/${encodeURIComponent(fn)}"></audio>`;
-            }
-            else if(j.status==='skip'){
-              badge.className='badge b-skip'; badge.textContent='⏭️ skip'; skip++;
-              const fn=sanitize(j.artiste+' - '+j.titre)+'.mp3';
-              audioCell.innerHTML=`<audio controls preload="none" src="/downloads/${encodeURIComponent(fn)}"></audio>`;
-            }
-            else if(j.status==='fail'){badge.className='badge b-fail'; badge.textContent='❌ échec'; badge.title=j.error||''; fail++; $('#logs').style.display='block'; $('#logs').textContent+=`[${j.artiste} - ${j.titre}] ${j.error||''}\n`}
-            const done=ok+skip+fail; const pct=Math.round(done/j.total*100);
-            $('#sOk').textContent=ok; $('#sSkip').textContent=skip; $('#sFail').textContent=fail;
-            $('#summary').textContent=`${done} / ${j.total}`;
-            $('#bar').style.width=pct+'%'; $('#pct').textContent=pct+'%';
-          }
-        }
-      }
-    }
-  }catch(e){toast('Erreur: '+e.message); clearInterval(timer)}
-  $('#start').disabled=false; clearInterval(timer);
+    ctl=new AbortController();
+    const resp=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text, quality, tracks}),signal:ctl.signal});
+    if(!resp.ok){const j=await resp.json().catch(()=>({})); toast(j.error||'Erreur'); document.title='youtube-audio-dl'; return}
+    if(!resp.body){toast('Streaming non supporté'); document.title='youtube-audio-dl'; return}
+    setRunningUI(true); tickStart();
+    await readStream(resp);
+  }catch(e){
+    if(e.name==='AbortError'){ if(!stopping) toast('Arrêté'); }
+    else toast('Erreur: '+e.message);
+    if(!stopping){stopTick(); setRunningUI(false)}
+  }
+  ctl=null;
 };
+$('#pauseBtn').onclick=async()=>{
+  if(!running) return;
+  const action=paused?'resume':'pause';
+  try{
+    const r=await fetch('/api/job',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})}).then(r=>r.json());
+    if(r.error){toast(r.error); return}
+    setPausedUI(action==='pause');
+    toast(action==='pause'?'Pause après le morceau en cours':'Reprise');
+  }catch(e){toast('Erreur réseau')}
+};
+$('#stopBtn').onclick=async()=>{
+  if(!running || stopping) return;
+  stopping=true;
+  const jid=jobId;
+  $('#stopBtn').disabled=true; $('#stopBtn').textContent='⏳'; $('#pauseBtn').disabled=true;
+  $('#elapsed').textContent='arrêt en cours…';
+  try{await fetch('/api/job',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'stop'})})}catch(e){}
+  try{if(ctl) ctl.abort()}catch(e){}
+  // Attend l'arrêt réel côté serveur (le worker finit son point de contrôle) :
+  // tant que le job est actif, Lancer reste verrouillé — fini le « ça tourne en fond ».
+  for(let k=0;k<120;k++){
+    await new Promise(r=>setTimeout(r,500));
+    try{
+      const s=await fetch('/api/job').then(r=>r.json());
+      if(!s.job) break;
+    }catch(e){break}
+  }
+  let kept=`${ok+skip}`;
+  try{
+    const s=await fetch('/api/job?id='+encodeURIComponent(jid)).then(r=>r.json());
+    if(s && (s.state==='cancelled' || s.state==='done')) kept=`${(s.ok||0)+(s.skip||0)}`;
+  }catch(e){}
+  stopping=false;
+  stopTick(); setRunningUI(false);
+  $('#stopBtn').textContent='⏹️';
+  toast(`Arrêté — ${kept} conservé(s), relance pour reprendre`);
+};
+// Re-attache au job actif après rechargement (le moteur continue en fond).
+(async()=>{
+  try{
+    const s=await fetch('/api/job').then(r=>r.json());
+    if(!s.job || (s.state!=='running' && s.state!=='paused') || !s.tracks) return;
+    buildRows(s.tracks);
+    totalN=s.total; ok=s.ok||0; skip=s.skip||0; fail=s.fail||0; jobId=s.job;
+    $('#progressWrap').style.display='block'; $('#sTotal').textContent=totalN;
+    (s.events||[]).forEach(e=>applyMsg(e,true));
+    updateProgress(totalN);
+    setRunningUI(true);
+    if(s.state==='paused') setPausedUI(true); else tickStart();
+    toast('Reconnecté au téléchargement en cours');
+    const resp=await fetch('/api/stream?id='+encodeURIComponent(s.job));
+    if(resp.ok && resp.body) await readStream(resp);
+  }catch(e){}
+})();
 </script>
 </body>
 </html>

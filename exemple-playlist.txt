@@ -1,0 +1,5 @@
+PERXLOM - lunacy (Slowed)
+SXCREDMANE - byebye - Slowed
+DudePlaya - DYSTOPIA
+# Une ligne = un morceau, format : Artiste - Titre
+# Separateurs acceptes : " - " " – " " — " " | " ";" ","

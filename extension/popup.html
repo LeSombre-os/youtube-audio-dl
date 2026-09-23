@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<style>
+*{box-sizing:border-box} body{width:340px;margin:0;padding:14px;font:13px system-ui;background:#111;color:#eee}
+h1{font-size:14px;margin:0 0 8px} .muted{color:#999;font-size:12px}
+#status{margin:8px 0;padding:8px 10px;border-radius:8px;background:#1c1c1f;border:1px solid #333;font-size:12px}
+#preview{max-height:180px;overflow:auto;background:#1c1c1f;border:1px solid #333;border-radius:8px;padding:8px;font-size:12px;white-space:pre-wrap;margin:8px 0}
+.row{display:flex;gap:8px;margin-top:8px} button{flex:1;padding:9px;border-radius:8px;border:1px solid #444;background:#222;color:#fff;cursor:pointer;font-weight:600}
+button.primary{background:#fff;color:#000;border-color:#fff} button:disabled{opacity:.5}
+</style>
+</head>
+<body>
+<h1>⬇️ youtube-audio-dl</h1>
+<div class="muted" id="engine">Moteur : vérification…</div>
+<div class="muted" id="src">Détection…</div>
+<div id="status">Clique « Capturer » sur une playlist Deezer / Spotify / YT Music.</div>
+<div id="preview" hidden></div>
+<div class="row">
+  <button id="cap">🔍 Capturer</button>
+  <button id="send" class="primary" disabled>Envoyer</button>
+</div>
+<div class="row">
+  <button id="copy" disabled>Copier</button>
+  <button id="dl" disabled>.txt</button>
+  <button id="diag" title="Copie la structure de la page pour débugger">🛠️ Diag</button>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>
